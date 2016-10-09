@@ -28,7 +28,7 @@
 ```
 - Now, we have a linux shell.
 
-### Step 1, let's run a shabby shell with busybox simply on linux kernel with qemu.
+### Day 1, let's run a shabby shell with busybox simply on linux kernel with qemu.
 As far as I know, qemu supports `-kernel bzImage`, so we can start a plain old linux kernel on qemu. Let's run it.
 ```bash
   qemu-system-x86_64 -kernel bzImage
@@ -44,10 +44,10 @@ But firstly, we need a raw hard disk image.
 ###### Let's create a raw disk image for linux
 ```bash
   # Create a 4MiB empty file 
-  dd if=/dev/zero of=file-initrd bs=1024 count=4096
+  dd if=/dev/zero of=hda.img bs=1024 count=4096
 
-  # Setup loop device, this device acts as a physical disk with the content of `file-initrd`
-  losetup /dev/loop0 file-initrd
+  # Setup loop device, this device acts as a physical disk with the content of `hda.img`
+  losetup /dev/loop0 hda.img
   # Format the disk as ext2/3/4
   mke2fs /dev/loop0
 
@@ -60,7 +60,7 @@ But firstly, we need a raw hard disk image.
   cp init /mnt/init
   mkdir -p /mnt/{dev,sys,proc}
 
-  # Unmount the disk so the disk content is written to file-initrd
+  # Unmount the disk so the disk content is written to hda.img
   umount /mnt
   losetup -d /dev/loop0
 ```
@@ -78,7 +78,7 @@ Why would we want to create `init` script. Because after linux kernel is initiat
 
 Run all of these with
 ```bash
-  qemu-system-x86_64 -kernel build/linux/arch/x86/boot/bzImage -hda build/boot/file-initrd -append "root=/dev/sda init=/init"
+  qemu-system-x86_64 -kernel build/linux/arch/x86/boot/bzImage -hda build/boot/hda.img -append "root=/dev/sda init=/init"
 ```
 You'll see
 ```bash
@@ -87,11 +87,52 @@ You'll see
   ...
   # /
 ```
-Wow! We run a linux shell just with linux kernel and busybox now :)
+Wow! We've run a linux shell just with linux kernel and busybox now :)
 Small as it is, it's actually a linux distribution.
 Exciting.
 
+### Stage 2, let's pack our linux on a single disk image.
+
+Now we can run our linux with qemu, but we rely on qemu's `-kernel kernel` to start our kernel.
+Next, we want grub to handle it. So what is the benifit? 
+We can install grub on MBR, and our linux distribution only contains on disk image.
+This is what most linux distributions does in the real world.
+
+Previously, we use a kernel image `bzImage` (it's the same as vmlinuz) and a disk partition image(/dev/sda). It's a partition image so it does not have an MBR.
+So first thing we need is a disk image.
+We create one with `fdisk /dev/loop0`(I won't repeat how to attach image file to loop0 device).
+Create a DOS MBR and a partition with command `c`, `n`, and save it with `w`.
+Update system partition table with `partprobe /dev/loop0` and we have the device `/dev/loop0p1`. 
+And do everything we've done to previous `/dev/loop0`, because now the partition `/dev/loop0p1` is our system partition.
+
+Then install grub on the disk with grub-install
+```bash
+  grub-install --target i386-pc /dev/loop0 --boot-directory=/mnt/boot
+```
+
+Create `/mnt/boot/grub/grub.cfg` with
+```
+  set default=0
+  set timeout=5
+
+  set root=(hd0,msdos1)
+
+  menuentry "Linux 4.8" {
+    linux /boot/vmlinuz root=/dev/sda1 ro
+  }
+```
+And we've done.
+This time we can start qemu with
+```bash
+  qemu-system-x86_64 -hda build/root/hda.img
+```
+Here's grub.
+
+![grub1](images/grub1.png)
+
+
+
 ### TODOs
-- grub
+- ~~grub~~
 - dynamic linked(ld)
 - systemd
